@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "demo": {
+    "name": "study-agent-demo",
+    "description": "Atlas3 and WebAPI demonstration with Study Agent integration.",
+    "status": "template"
+  },
+  "components": {
+    "atlas3": {
+      "upstream": {
+        "repository": "OHDSI/Atlas3",
+        "base_commit": "<40-character-upstream-base-sha>"
+      },
+      "feature": {
+        "repository": "vinci-ohdsi/Atlas3",
+        "ref": "feature/<name>",
+        "commit": "<40-character-feature-sha>"
+      },
+      "image": "ghcr.io/vinci-ohdsi/atlas3@sha256:<image-digest>"
+    },
+    "webapi": {
+      "upstream": {
+        "repository": "OHDSI/WebAPI",
+        "base_commit": "<40-character-upstream-base-sha>"
+      },
+      "feature": {
+        "repository": "vinci-ohdsi/WebAPI3",
+        "ref": "feature/<name>",
+        "commit": "<40-character-feature-sha>"
+      },
+      "image": "ghcr.io/vinci-ohdsi/webapi3@sha256:<image-digest>"
+    },
+    "study_agent": {
+      "feature": {
+        "repository": "OHDSI/StudyAgent",
+        "ref": "<ref>",
+        "commit": "<40-character-feature-sha>"
+      },
+      "image": "<registry/image@sha256:digest>"
+    }
+  },
+  "smoke_test": {
+    "command": "<documented command or script path>",
+    "expected_result": "<observable successful user-story outcome>"
+  }
+}

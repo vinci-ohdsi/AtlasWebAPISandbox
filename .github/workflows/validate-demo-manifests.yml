@@ -1,0 +1,55 @@
+name: Validate demo manifests
+
+on:
+  pull_request:
+    paths:
+      - 'demos/**'
+      - '.github/workflows/validate-demo-manifests.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'demos/**'
+      - '.github/workflows/validate-demo-manifests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Validate committed demo manifests
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest_paths = sorted(Path("demos").glob("*/demo-manifest.json"))
+          if not manifest_paths:
+              print("No committed demo manifests yet; templates are not releases.")
+
+          required_top_level = {"schema_version", "demo", "components", "smoke_test"}
+          required_components = {"atlas3", "webapi", "study_agent"}
+          for path in manifest_paths:
+              data = json.loads(path.read_text())
+              missing = required_top_level - data.keys()
+              if missing:
+                  raise SystemExit(f"{path}: missing top-level fields: {sorted(missing)}")
+              missing = required_components - data["components"].keys()
+              if missing:
+                  raise SystemExit(f"{path}: missing components: {sorted(missing)}")
+              for component_name, component in data["components"].items():
+                  feature = component.get("feature", {})
+                  if not all(feature.get(key) for key in ("repository", "commit")):
+                      raise SystemExit(f"{path}: {component_name} needs feature.repository and feature.commit")
+                  image = component.get("image", "")
+                  if "@sha256:" not in image:
+                      raise SystemExit(f"{path}: {component_name} image must be pinned by digest")
+              for component_name in ("atlas3", "webapi"):
+                  upstream = data["components"][component_name].get("upstream", {})
+                  if not all(upstream.get(key) for key in ("repository", "base_commit")):
+                      raise SystemExit(f"{path}: {component_name} needs upstream.repository and upstream.base_commit")
+              print(f"Validated {path}")
+          PY
