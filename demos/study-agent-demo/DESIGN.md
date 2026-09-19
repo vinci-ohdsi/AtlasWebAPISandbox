@@ -291,11 +291,56 @@ interface ConceptSetAssistantSession {
 }
 ```
 
-The UI should use a side panel or drawer separate from the normal search-result
-table. It should render structured questions, strategy cards, policy fields,
-and candidate review rows rather than treating LLM prose as executable
-instructions. `Create draft concept set` remains disabled until an explicit,
-complete policy review has occurred.
+### Atlas3 interaction surfaces
+
+Atlas3 already renders `ConceptSetEditor` as a page-level, right-side drawer
+over both Concepts tabs. The assistant uses that editor rather than adding a
+third top-level Concepts tab or replacing the normal vocabulary search table.
+
+```text
+Concepts → Search landing page
+  /ohdsi narrative
+        ↓
+Open unsaved ConceptSetEditor drawer + attach a new assistant session
+        ↓
+Dialogue and proposal review inside the drawer
+        ↓
+Apply reviewed definition items to Selected
+        ↓
+Included resolves the vocabulary expansion of Selected
+        ↓
+Create/Save performs final WebAPI validation and persistence
+```
+
+The assistant has two modes:
+
+- **New mode:** a landing-page `/ohdsi` command opens an empty, unsaved
+  concept-set drawer. The user names and reviews the draft there before the
+  normal Create action persists it.
+- **Extension mode:** a `/ohdsi` command in the Search tab of an existing
+  concept-set drawer creates a proposed diff against that set's current
+  expression and version. It never replaces the existing expression wholesale.
+
+The assistant panel belongs inside the concept-set drawer. It renders
+structured clarification questions, strategy cards, rationale, technical
+validation status, and an explicit `Apply reviewed items` action; it does not
+treat LLM prose as executable instructions.
+
+`Selected` is the exact, editable `ConceptSetExpression`: concept rows and
+their individual exclusion, descendant, and mapped flags. This is the
+authoritative policy-review surface. `Included` is the non-authoritative,
+server-resolved expansion of `Selected`, including descendants where selected.
+It is evidence of the definition's effect, not a surface for editing its rules.
+
+An assistant proposal enters a review queue and changes `Selected` only after
+the user applies reviewed items. A manual edit to `Selected` after proposal
+approval invalidates the approved-expression checksum. The user may continue
+editing freely, but Create/Save must obtain a new valid reviewed expression and
+complete the mandatory WebAPI validation before persistence.
+
+The clarification option `classification` is intentionally generic rather than
+an ATC-only label. `all` means every concept level offered in that response; the
+response schema must state the concrete option set so its meaning cannot drift.
 
 ## Security, privacy, and failure behavior
 
@@ -345,17 +390,26 @@ Provide two profiles:
 
 ## Acceptance scenario
 
-1. An authorized user enters the example `/ohdsi` narrative in Concepts →
-   Search.
-2. Atlas3 opens the assistant panel and displays a strategy or structured
-   clarification question.
-3. The user answers and explicitly requests a proposal.
-4. Atlas3 displays reviewable candidate concepts, explicit policies, exclusions,
-   and rationale; no concept set has been saved.
-5. The user approves the displayed policy and explicitly creates a draft.
-6. WebAPI3 creates a normal draft concept set and Atlas3 opens it in the usual
-   editor.
-7. The smoke test verifies that no browser request targets ACP/MCP directly and
+1. An authorized user enters the example `/ohdsi` narrative in the Concepts →
+   Search landing field.
+2. Atlas3 opens an empty, unsaved `ConceptSetEditor` drawer and attaches the
+   new Study Agent session to that draft.
+3. The drawer assistant panel displays a strategy or structured clarification
+   question. The user selects a concept level, including `classification` or
+   `all` only when intended, and explicitly requests a proposal.
+4. The panel displays candidate rationale and item-level policy. After explicit
+   approval, the user applies the reviewed items; they appear in `Selected` with
+   their exact exclusion/descendant/mapped flags.
+5. The user opens `Included` and observes the resolved extension of the selected
+   definition. They can refine the draft using the drawer's normal Search tab.
+6. If the user makes a manual Selected-item change, Atlas3 requires renewed
+   review and validation before Create/Save.
+7. Create/Save succeeds only after the approved expression passes both ACP and
+   WebAPI validation. WebAPI3 creates the normal concept set and Atlas3 retains
+   it in the same editor drawer.
+8. A separate smoke case starts `/ohdsi` from an existing editor Search tab and
+   verifies that the proposal is a reviewable diff rather than a replacement.
+9. The smoke test verifies that no browser request targets ACP/MCP directly and
    that no secret appears in the browser bundle or committed demo configuration.
 
 ## Decisions still required before implementation
