@@ -92,7 +92,7 @@ The response is a WebAPI-owned session view, not a raw ACP response:
     {
       "id": "concept_level",
       "prompt": "Which concept levels should be included?",
-      "options": ["ingredient", "clinical_drug", "both"]
+      "options": ["ingredient", "clinical_drug", "classification", "all"]
     }
   ],
   "allowed_actions": ["reply", "cancel"],
@@ -105,14 +105,38 @@ The response is a WebAPI-owned session view, not a raw ACP response:
 ```json
 POST /study-agent/v1/concept-set-sessions/{sessionId}/messages
 {
-  "message": "Both, and exclude products containing protamine.",
-  "answers": {"concept_level": "both"}
+  "message": "All applicable levels, and exclude products containing protamine.",
+  "answers": {"concept_level": "all"}
 }
 ```
 
 WebAPI3 validates that the session belongs to the caller and that the state
 allows a reply. It returns the same session-view shape. The assistant may offer
 `request_proposal`, but may not create or modify an Atlas concept set.
+
+### Vocabulary filters and source-code lists
+
+Atlas3 supplies the user's active concept-record filters as structured
+constraints, rather than as a rendered search string. The contract carries the
+applicable vocabulary, domain, concept-class, standard/classification, validity,
+and vocabulary-source selections. Those filters are hard constraints for the
+primary proposal.
+
+An alternate strategy that requires concepts outside an active filter is kept
+separate, visibly labels each proposed exception and its rationale, and requires
+an explicit user confirmation scoped to that strategy. It does not change the
+user's Atlas filters or silently blend cross-filter concepts into the primary
+draft. For example, an RxNorm-filtered request cannot silently substitute ATC
+classification concepts merely because they offer a convenient hierarchy.
+
+The dialogue may accept a pasted NDC or ICD source-code list of at most 100
+codes. The UI states the limit before paste and rejects an oversized list rather
+than truncating it. Source values are preserved as supplied; NDC formatting
+normalization is only a transparent matching aid. Mapping review shows mapped,
+unmapped, invalid, ambiguous, and one-to-many outcomes before standard concepts
+are proposed. The immutable review manifest retains the source-code and mapping
+provenance. File upload, URL retrieval, and unbounded external-code ingestion
+are intentionally out of scope for this authoring feature.
 
 ### Request a proposal
 
@@ -342,6 +366,25 @@ The clarification option `classification` is intentionally generic rather than
 an ATC-only label. `all` means every concept level offered in that response; the
 response schema must state the concrete option set so its meaning cannot drift.
 
+## Persistence, provenance, and vocabulary refresh
+
+WebAPI3 owns durable assistant state. Sessions are scoped to the authenticated
+Atlas user and to either a new draft context or a specific saved concept set and
+expression version. Working dialogue is archived after 90 days of inactivity in
+the demonstration, but is not deleted. Approved review manifests, expression
+checksums, technical-validation records, and create/save outcomes are immutable
+version-bound provenance and are retained for the life of their concept set.
+
+The concept-set expression is intensional and never silently changes because a
+vocabulary changes. Separately, WebAPI records resolved-extension evidence for
+a named vocabulary source/release: resolution timestamp, expression checksum,
+resolved-extension checksum and count, and available vocabulary-release
+metadata. A user may later invoke an explicit `refresh against newer
+vocabulary` action from an existing concept-set drawer. It supplies the saved
+expression and prior provenance to Study Agent, which proposes a reviewed
+revision or concludes that no revision is warranted. It never rewrites a saved
+historical expression automatically.
+
 ## Security, privacy, and failure behavior
 
 - Send narrative authoring intent and vocabulary metadata only. Do not send
@@ -367,12 +410,30 @@ The future `compose.yaml` consumes digest-pinned images for Atlas3, WebAPI3,
 Study Agent ACP/MCP, PostgreSQL, and any vocabulary fixture. It should expose
 only the reverse proxy/Atlas/WebAPI entry points.
 
-The demo needs a versioned vocabulary subset containing the exact concepts and
-relationships used by several specified concept-set scenarios. Include the
-relevant OMOP vocabulary tables and relationship/ancestor records; a
-`concept`-only subset is not sufficient for meaningful inclusion and exclusion
-review. The fixture is built from an agreed vocabulary query when the scenarios
-and expected concept IDs are final.
+The public repository does not distribute an extracted Athena vocabulary subset.
+Instead it provides a deterministic fixture specification, expected concept IDs
+and relationships, checksums, and an extraction/build script. A demo operator
+obtains the agreed, licensed Athena vocabulary release and builds the local
+fixture. The generated manifest records the source release/date, included
+vocabulary license notices, and fixture checksums.
+
+The fixture includes the exact concepts and relationships used by these
+deterministic scenarios:
+
+1. RxNorm bolus-insulin inclusion and explicit product exclusions.
+2. A SNOMED condition request requiring clinical-scope clarification.
+3. A LOINC measurement request requiring component/specimen clarification.
+4. An RxNorm-filtered request with a separately confirmed ATC-classification
+   alternate strategy.
+5. A pasted NDC or ICD source-code list mapped to reviewed standard RxNorm/CVX
+   or SNOMED concepts, including transparent NDC formatting behavior.
+6. A multi-ingredient RxNorm Extension product request requiring explicit
+   ingredient-versus-product and all-versus-any policy clarification.
+
+Include the relevant OMOP vocabulary tables and relationship/ancestor records;
+a `concept`-only subset is not sufficient for meaningful inclusion, exclusion,
+mapping, or Included-resolution review. Exact concept IDs and the ICD variant
+are selected when the operator creates the fixture from the agreed release.
 
 EUNOMIA GiBleed 5.3 is a candidate synthetic data fixture for secondary
 case-count demonstration. Such counts must be clearly labelled as
@@ -412,14 +473,16 @@ Provide two profiles:
 9. The smoke test verifies that no browser request targets ACP/MCP directly and
    that no secret appears in the browser bundle or committed demo configuration.
 
-## Decisions still required before implementation
+## Forward roadmap: cohort-definition assistance
 
-- The persistence schema and retention period for assistant sessions, review
-  manifests, and audit metadata.
-- The fixture vocabulary source/licensing/distribution approach and expected
-  concept IDs, after the additional concept-set scenarios are specified.
-- The initial generic vocabulary-filter contract: Atlas3 supplies the user's
-  active concept-record filters as constraints, and the proposal must surface
-  any cross-vocabulary strategy for explicit confirmation. For example, a
-  request for RxNorm codes must not silently substitute ATC classification
-  concepts merely because they offer convenient hierarchy.
+After the concept-set demonstration matures, the next planned vertical slice is
+cohort-definition assistance from the Atlas cohort authoring/search context. It
+will reuse the same product boundaries: authenticated WebAPI facade,
+artifact/version context, immutable review manifest, explicit user action, and
+cross-runtime technical validation, while building on the existing
+`phenotype_make_computable` ACP flow.
+
+This is roadmap material, not an implemented cohort-definition feature. Its
+initial scope ends at creation and review of a cohort definition. Cohort
+generation, analysis execution, and writes to production data sources remain
+separately authorized operations with their own design and safety gates.
