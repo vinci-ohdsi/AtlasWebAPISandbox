@@ -1,6 +1,6 @@
 # Study Agent concept-search assistant: integration design
 
-**Status:** proposed contract; no runtime endpoint is implemented by this document.
+**Status:** agreed design contract; no runtime endpoint is implemented by this document.
 
 ## Objective
 
@@ -39,7 +39,8 @@ host-published ports.
 ## WebAPI3 API contract
 
 All routes are relative to the normal WebAPI context path and require a valid
-Atlas JWT plus the proposed `study-agent:concept-set-assist` permission.
+Atlas JWT, the `study-agent:concept-set-assist` permission, and the enabled
+`slash-ohdsi-concept-search` feature flag.
 
 ```text
 POST /WebAPI/study-agent/v1/concept-set-sessions
@@ -128,8 +129,14 @@ POST /study-agent/v1/concept-set-sessions/{sessionId}/proposals
 ```
 
 This is an explicit user transition from discussion to a bounded proposal. The
-WebAPI adapter may use `phenotype_make_computable` or a dedicated
-concept-set-authoring adapter, but it must preserve the same safeguards:
+first implementation uses a dedicated `concept_set_authoring` ACP flow. It
+reuses vocabulary retrieval, structured candidate review, approval, and
+technical-validation patterns from `phenotype_make_computable`, but does not
+generate a cohort definition, Capr source, or Circe cohort JSON. The existing
+`phenotype_make_computable` flow is cohort-definition oriented and its Capr
+guidance assumes concept sets are already built.
+
+The concept-set flow preserves these safeguards:
 
 - retrieve candidates; do not treat a retrieval limit as completeness;
 - state proposed descendant, mapped-code, and exclusion policies explicitly;
@@ -157,20 +164,86 @@ make clear that the material is a technical proposal, not clinical validation.
 POST /study-agent/v1/concept-set-sessions/{sessionId}/draft-concept-set
 {
   "action": "create_draft",
-  "approved_policy": {
-    "include_concept_ids": [1, 2, 3],
-    "excluded_concept_ids": [4],
-    "include_descendants": false,
-    "include_mapped": false
-  },
+  "approved_review_revision": 3,
+  "approved_expression_checksum": "sha256:...",
   "concept_set_name": "Bolus insulin (draft)"
 }
 ```
 
-The explicit submitted policy is compared with the reviewed proposal and the
-session state. WebAPI3 rejects missing or changed policy fields rather than
-silently filling them in. On success, it creates a normal Atlas draft concept
-set under the current user and returns its standard identifier and editor URL.
+The submitted revision and checksum identify the complete, server-held reviewed
+expression. They avoid reducing a concept set to flat inclusion/exclusion IDs
+and prevent a browser from silently changing item policy while requesting
+persistence. WebAPI3 rejects an expired, missing, or changed review rather than
+silently filling in policy fields. On success, it creates a normal Atlas draft
+concept set under the current user and returns its standard identifier and editor
+URL.
+
+### Canonical reviewed artifact: `ConceptSetExpression`
+
+The review and persistence artifact is Atlas/WebAPI's concept-set expression,
+not a Circe cohort definition. Every item retains its own inclusion/exclusion,
+descendant, and mapped-code choices:
+
+```json
+{
+  "items": [
+    {
+      "concept": {"CONCEPT_ID": 21600714, "VOCABULARY_ID": "ATC"},
+      "isExcluded": false,
+      "includeDescendants": true,
+      "includeMapped": false
+    },
+    {
+      "concept": {"CONCEPT_ID": 21600728, "VOCABULARY_ID": "ATC"},
+      "isExcluded": true,
+      "includeDescendants": true,
+      "includeMapped": false
+    }
+  ]
+}
+```
+
+The ACP proposal produces structured candidate and policy data. WebAPI3
+hydrates each approved concept from its configured vocabulary source and stores
+the normal concept-set item rows through existing WebAPI concept-set services.
+
+#### Mandatory cross-runtime technical validation
+
+ACP performs producer-side technical validation of the canonical expression
+using its configured R/CirceR runtime before returning a proposal. This follows
+the existing R-validation pattern, but uses a fixed JSON-validation script
+rather than LLM-generated R or a cohort-only Capr definition.
+
+Before creating a draft, WebAPI3 independently and mandatorily validates that
+same canonical expression using its deployed Java/Circe-based concept-set
+implementation and configured vocabulary source. This is the authoritative
+acceptance gate for persistence. It includes existing concept-set SQL and
+included/mapped-concept lookup behavior where applicable to the selected source.
+
+```text
+ACP / R / CirceR validation
+  → Can the Study Agent service technically construct and interpret it?
+
+WebAPI3 / Java / Circe validation
+  → Will this exact expression work in the deployed Atlas/WebAPI environment?
+```
+
+Both checks must pass. ACP validation is technical producer-side evidence; it
+does not establish WebAPI compatibility, clinical validity, or permission to
+persist a draft without explicit review approval. If the runtimes disagree,
+WebAPI3 returns `concept_expression_incompatible` and does not transform, save,
+or silently accept the expression.
+
+Persisted review provenance includes the canonical-expression checksum, ACP
+validation status and R/CirceR/Capr versions, WebAPI build/version, WebAPI
+validation result, and selected vocabulary-source metadata. The demonstration
+includes cross-runtime golden expressions and compares resolved
+inclusion/mapping behavior across ACP and WebAPI before an interactive release.
+
+Capr/Circe cohort artifacts remain downstream optional outputs when a user later
+uses the saved reviewed concept set in a cohort-definition workflow. They are
+derived from the concept-set expression and never replace it as the source of
+truth for concept-set authoring.
 
 ## Atlas3 state model
 
@@ -240,8 +313,8 @@ complete policy review has occurred.
   the user to request a new proposal.
 - Permission denial is `403`; an unknown or other-user session is `404` to
   avoid session enumeration.
-- The feature is disabled by default and is controlled by an explicit WebAPI
-  configuration switch plus the dedicated permission.
+- The feature is disabled by default and is controlled by the explicit WebAPI3
+  feature flag `slash-ohdsi-concept-search` plus the dedicated permission.
 
 ## Demonstration requirements
 
@@ -250,13 +323,17 @@ Study Agent ACP/MCP, PostgreSQL, and any vocabulary fixture. It should expose
 only the reverse proxy/Atlas/WebAPI entry points.
 
 The demo needs a versioned vocabulary subset containing the exact concepts and
-relationships used by the bolus-insulin scenario. Include the relevant OMOP
-vocabulary tables and relationship/ancestor records; a `concept`-only subset is
-not sufficient for meaningful inclusion and exclusion review.
+relationships used by several specified concept-set scenarios. Include the
+relevant OMOP vocabulary tables and relationship/ancestor records; a
+`concept`-only subset is not sufficient for meaningful inclusion and exclusion
+review. The fixture is built from an agreed vocabulary query when the scenarios
+and expected concept IDs are final.
 
-EUNOMIA case counts, if included, are secondary. They must be clearly labelled
-as fixture-backed demonstration counts and must not be used to claim clinical
-validation of the proposal.
+EUNOMIA GiBleed 5.3 is a candidate synthetic data fixture for secondary
+case-count demonstration. Such counts must be clearly labelled as
+fixture-backed and must not be used to claim clinical validation of the
+proposal. Counts in Concepts → Sets are out of scope; the existing Concepts →
+Search count columns remain independent of this feature.
 
 Provide two profiles:
 
@@ -283,12 +360,12 @@ Provide two profiles:
 
 ## Decisions still required before implementation
 
-- Whether the first proposal adapter is a constrained mode of
-  `phenotype_make_computable` or a new concept-set-specific ACP flow.
-- The precise role/permission migration and feature-flag name in WebAPI3.
 - The persistence schema and retention period for assistant sessions, review
   manifests, and audit metadata.
-- The fixture vocabulary source, licensing/distribution approach, and the
-  expected concept IDs for deterministic smoke tests.
-- Whether the first release supports only a named RxNorm subset or generic
-  vocabulary selection.
+- The fixture vocabulary source/licensing/distribution approach and expected
+  concept IDs, after the additional concept-set scenarios are specified.
+- The initial generic vocabulary-filter contract: Atlas3 supplies the user's
+  active concept-record filters as constraints, and the proposal must surface
+  any cross-vocabulary strategy for explicit confirmation. For example, a
+  request for RxNorm codes must not silently substitute ATC classification
+  concepts merely because they offer convenient hierarchy.
