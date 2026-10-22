@@ -17,6 +17,12 @@ To run this demo a developer would:
 
 No GitHub workflow is involved in running this local demo. The Sandbox has a generic workflow that validates committed demo-manifest.json files for digest-pinned OCI demos, but this local source-built profile uses demo-manifest.local.json, so it is intentionally outside that workflow.
 
+The final source record for the successful OHDSI 2026 Global Symposium
+demonstration is [OHDSI Global Symposium 2026](releases/ohdsi-global-symposium-2026.json).
+It records the exact Study Agent, Atlas3, WebAPI3, R-package, and conference
+client commits. It is provenance for the demonstrated stack, not a portable
+production deployment profile.
+
 ## Detailed instructions
 
 This is the profile for a demo using the completed 2026-09-29 Atlas
